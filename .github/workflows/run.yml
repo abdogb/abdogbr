@@ -9,17 +9,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb chromium-browser chromium-chromedriver
+          sudo apt-get install -y chromium-browser chromium-chromedriver xvfb
+
+      - name: Set Chrome Environment Variables
+        run: |
+          echo "CHROME_BIN=$(which chromium-browser)" >> $GITHUB_ENV
+          echo "PATH=$PATH:/usr/lib/chromium-browser/" >> $GITHUB_ENV
+
       - uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
+          python-version: '3.10'
+
       - name: Install Python dependencies
         run: |
           pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
-      - name: Run search tool headless
+
+      - name: Run search tool with xvfb
         run: |
           xvfb-run -a python "modified_search_tool.py"
