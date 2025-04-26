@@ -8,3 +8,4 @@ scikit-learn
 selenium
 webdriver-manager
 torch
+pyvirtualdisplay
