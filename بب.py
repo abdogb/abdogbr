@@ -1,21 +1,29 @@
 import asyncio
 import aiohttp
-import time
 import random
 import re
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse
-from googlesearch import search
 import csv
 import json
 import logging
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin, urlparse
+from googlesearch import search
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.pipeline import make_pipeline
+from sklearn.model_selection import train_test_split
+from sklearn import metrics
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service as ChromeService
+from webdriver_manager.chrome import ChromeDriverManager
 
 # === LOGGING CONFIG ===
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # === TELEGRAM CONFIG ===
-TOKEN = '7925209531:AAF5e1jxZiGZB7bKyvLWxIdziGfjAR86blM'  # Replace with your bot token
-CHAT_ID = '1296559148'  # Replace with your chat ID
+TOKEN = '7925209531:AAF5e1jxZiGZB7bKyvLWxIdziGfjAR86blM'
+CHAT_ID = '1296559148'
 
 # === ANSI COLORS ===
 class Color:
@@ -30,31 +38,29 @@ class Color:
 
 # === CONFIGURATIONS ===
 CONFIG_FILE = 'config.json'
+AI_MEMORY_FILE = 'ai_memory.json'
 DEFAULT_CONFIG = {
     "min_braintree_hits": 4,
     "request_timeout": 15,
     "retry_attempts": 3,
     "retry_delay": 5,
     "concurrent_requests": 5,
-    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+    "user_agent": "Mozilla/5.0 (Linux; Android 10; Pixel 3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.101 Mobile Safari/537.36",
     "enable_proxy": False,
-    "proxies": [],  # Format: ["http://user:pass@host:port", "socks5://host:port"]
+    "proxies": [],
     "payment_link_keywords": ['checkout', 'payment', 'cart', 'shop', 'billing', 'purchase', 'order', 'pay', 'product'],
     "automatic_dorks": [
-        'inurl:checkout braintree',
-        'inurl:payment braintree',
-        'site:.com powered by braintree',
-        'site:.net powered by braintree',
-        'site:.org powered by braintree'
+        '/soap inurl:"/catalog/product/view/id/" -inurl:products -inurl:collections',
+        '"shop" + "Women" + "Kids" + "Men\'s" + "My cart"',
+        '"cheap children\'s clothing" OR "discount kids apparel" "Braintree credit card processing" seasonal discounts -site:stripe.com -site:paypal.com -site:shopify.com'
     ],
-    "number_of_sites_per_dork": 20  # عدد المواقع التي سيتم فحصها لكل Dork تلقائي
+    "number_of_sites_per_dork": 20
 }
 
 def load_config():
     try:
         with open(CONFIG_FILE, 'r') as f:
             config = json.load(f)
-            # Set default values for missing keys
             for key in DEFAULT_CONFIG:
                 config.setdefault(key, DEFAULT_CONFIG[key])
             return config
@@ -82,24 +88,49 @@ PAYMENT_LINK_KEYWORDS = config['payment_link_keywords']
 AUTOMATIC_DORKS = config['automatic_dorks']
 NUMBER_OF_SITES_PER_DORK = config['number_of_sites_per_dork']
 
+# AI Memory
+def load_ai_memory():
+    try:
+        with open(AI_MEMORY_FILE, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {
+            "successful_dorks": [],
+            "bad_domains": [],
+            "best_user_agents": [],
+            "proxy_scores": {}
+        }
+
+ai_memory = load_ai_memory()
+
+# إعداد نموذج GPT-2 لتوليد Dorks
+tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+model = GPT2LMHeadModel.from_pretrained('gpt2')
+
+# نموذج لتوليد Dorks
+def generate_dork(prompt, max_length=50):
+    """توليد Dork باستخدام GPT-2."""
+    inputs = tokenizer.encode(prompt, return_tensors='pt')
+    outputs = model.generate(inputs, max_length=max_length, num_return_sequences=1)
+    return tokenizer.decode(outputs[0], skip_special_tokens=True)
+
 async def get_proxy():
     if ENABLE_PROXY and proxy_pool:
         return random.choice(proxy_pool)
     return None
 
 # === CLEAN AND MINIMAL DISPLAY ===
-def print_block(url, hits, pages, status, details=None):
-    print(f"{Color.MAGENTA}{'═'*70}{Color.RESET}")
-    print(f"{Color.CYAN}🌍 URL: {url}{Color.RESET}")
-    print(f"{Color.BLUE}🧾 Pages Checked: {pages}{Color.RESET}")
-    print(f"{Color.YELLOW}⚙️ Braintree Signals: {hits}/12 (Threshold: {MIN_BRAINTREE_HITS}){Color.RESET}")
-    if details:
-        print(f"{Color.YELLOW}🔍 Details: {', '.join(details)}{Color.RESET}")
-    if status == 'FOUND':
-        print(f"{Color.GREEN}✅ Status: Braintree Likely Present{Color.RESET}")
-    else:
-        print(f"{Color.RED}❌ Status: Not Detected{Color.RESET}")
-    print(f"{Color.MAGENTA}{'═'*70}{Color.RESET}")
+def print_enhanced_message(url, hits, pages_checked, status, details=None):
+    status_icon = "✅" if status == "FOUND" else "❌"
+    details_str = ', '.join(details) if details else "لا توجد تفاصيل"
+    
+    print(f"{Color.MAGENTA}╔════════════════════════════════════╗{Color.RESET}")
+    print(f"{Color.CYAN}🌐 URL: {url}{Color.RESET}")
+    print(f"{Color.BLUE}📄 Pages Checked: {pages_checked}{Color.RESET}")
+    print(f"{Color.YELLOW}⚙️ Braintree Signals: {hits}/{MIN_BRAINTREE_HITS}{Color.RESET}")
+    print(f"{Color.YELLOW}🔍 Details: {details_str}{Color.RESET}")
+    print(f"{Color.GREEN}{status_icon} Status: {status}{Color.RESET}")
+    print(f"{Color.MAGENTA}╚════════════════════════════════════╝{Color.RESET}")
 
 async def log_results(url, pages, hits, status, details=None):
     with open('braintree_results.csv', 'a', newline='', encoding='utf-8') as csvfile:
@@ -119,19 +150,19 @@ async def fetch(session, url, timeout=REQUEST_TIMEOUT):
     try:
         async with session.get(url, timeout=timeout, proxy=proxy, headers={'User-Agent': USER_AGENT}, ssl=False, allow_redirects=True) as response:
             if response.status == 200:
-                return await response.text()
+                return await response.text(), response.status
             else:
                 logging.warning(f"Error fetching {url}: {response.status}")
-                return None
+                return None, response.status
     except aiohttp.ClientConnectionError as e:
         logging.error(f"Client connection error fetching {url}: {e}")
-        return None
+        return None, None
     except asyncio.TimeoutError:
         logging.warning(f"Timeout fetching {url}")
-        return None
+        return None, None
     except Exception as e:
         logging.error(f"Unexpected error fetching {url}: {e}")
-        return None
+        return None, None
 
 def is_valid_url(url):
     try:
@@ -162,20 +193,19 @@ def extract_forms(html):
     soup = BeautifulSoup(html, 'html.parser')
     return "".join(str(i) for i in soup.find_all(['form', 'input']))
 
-def check_braintree(text):
+async def check_braintree(text):
     checks = {
         "braintree_keyword": lambda t: 'braintree' in t,
         "client_token": lambda t: 'client-token' in t and 'braintree' in t,
-        "braintree_api": lambda t: 'braintree-api' in t,
-        "braintreegateway_domain": lambda t: 'braintreegateway.com' in t,
+        "braintree_api": lambda t: 'api.braintreegateway.com' in t,
         "dropin_create": lambda t: 'dropin.create' in t,
-        "sandbox_auth": lambda t: 'authorization:' in t and 'sandbox_' in t,
+        "payment_method_nonce": lambda t: 'payment_method_nonce' in t,
+        "sandbox_auth": lambda t: 'sandbox_' in t and 'authorization:' in t,
         "data_braintree_attr": lambda t: 'data-braintree' in t,
         "braintree_client_obj": lambda t: 'braintree.client' in t,
         "hostedfields_create": lambda t: 'hostedfields.create' in t,
-        "transaction_id_pattern": lambda t: re.search(r'bt[0-9a-z]{24,}', t),
-        "braintree_sdk_path": lambda t: re.search(r'js\/client\/\d+_\d+\/\w+\.js', t),
-        "braintree_form_selector": lambda t: re.search(r'\.braintree-form', t)
+        "iframe_braintree": lambda t: '<iframe' in t and 'braintree' in t,
+        "transaction_id_pattern": lambda t: re.search(r'bt[0-9a-z]{24,}', t)
     }
     hits = 0
     found_details = []
@@ -185,16 +215,39 @@ def check_braintree(text):
             found_details.append(key)
     return hits, found_details
 
+async def additional_checks(url, session):
+    """إجراء فحوصات إضافية على الموقع لتأكيد دعم Braintree."""
+    additional_checks = [
+        lambda html: 'paypal' in html.lower(),  # تحقق من PayPal
+        lambda html: 'braintreegateway.com' in html.lower(),  # تحقق من المجال
+    ]
+    
+    html, _ = await fetch(session, url)
+    for check in additional_checks:
+        if check(html):
+            return True
+    return False
+
+async def dynamic_analysis(url):
+    options = webdriver.ChromeOptions()
+    options.add_argument('--headless')
+    options.add_argument('--no-sandbox')
+    driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
+    driver.get(url)
+    html = driver.page_source
+    driver.quit()
+    return html
+
 async def download_js(session, js_urls):
     js_data = ''
     tasks = [fetch(session, url) for url in js_urls if is_valid_url(url)]
     results = await asyncio.gather(*tasks)
-    for res in results:
+    for res, _ in results:
         if res:
             js_data += res + "\n"
     return js_data
 
-async def analyze_site(url, session):
+async def analyze_site(url, session, feedback_data):
     if not url.startswith('http'):
         url = 'http://' + url
     if not is_valid_url(url):
@@ -202,10 +255,12 @@ async def analyze_site(url, session):
         await log_results(url, 0, 0, 'ERROR', 'Invalid URL')
         return
     try:
-        html = await fetch(session, url, timeout=3)
+        html, status = await fetch(session, url, timeout=3)
         if html:
-            full_text = html
-            payment_pages = extract_payment_links(html, url)
+            # استخدم Selenium لتحليل الصفحة
+            dynamic_html = await dynamic_analysis(url)
+            full_text = dynamic_html
+            payment_pages = extract_payment_links(dynamic_html, url)
             pages_checked = 1
 
             payment_tasks = []
@@ -221,20 +276,24 @@ async def analyze_site(url, session):
                     full_text += extract_forms(p_html)
                     full_text += await download_js(session, js_urls)
 
-            hits, details = check_braintree(full_text)
+            hits, details = await check_braintree(full_text)
             status = 'FOUND' if hits >= MIN_BRAINTREE_HITS else 'NOT_FOUND'
-            print_block(url, hits, pages_checked, status, details)
-            await log_results(url, pages_checked, hits, status, details)
+            print_enhanced_message(url, hits, pages_checked, status, details)
 
-            if status == 'FOUND':
-                await send_message(CHAT_ID, f"✅ تم الكشف عن Braintree:\nURL: {url}\nHits: {hits}/{len(check_braintree('test')[1])}\nDetails: {', '.join(details)}")
+            # إجراء فحوصات إضافية إذا تم العثور على إشارات
+            if hits > 0:
+                if await additional_checks(url, session):
+                    await send_message(CHAT_ID, f"✅ تم الكشف عن Braintree:\nURL: {url}\nHits: {hits}/{len(check_braintree('test')[1])}\nDetails: {', '.join(details)}")
+                    feedback_data.append((url, True))  # إضافة بيانات التغذية الراجعة على أنها ناجحة
+                else:
+                    feedback_data.append((url, False))  # إضافة بيانات التغذية الراجعة على أنها غير ناجحة
 
     except Exception as e:
         logging.error(f"Error analyzing site {url}: {e}")
         await log_results(url, 0, 0, 'ERROR', f'Error: {e}')
 
 async def process_payment_page(session, page, base_url):
-    p_html = await fetch(session, page)
+    p_html, _ = await fetch(session, page)
     js_urls = []
     if p_html:
         js_urls = extract_js(p_html, page)
@@ -251,7 +310,7 @@ async def google_dork_search(dork, limit=100):
         logging.error(f"Google Search error: {e}")
     return results
 
-async def automatic_scan(session):
+async def automatic_scan(session, feedback_data):
     print(f"{Color.CYAN}🛠️ Starting automatic scan using predefined Dorks...{Color.RESET}")
     # Initialize CSV log file if it doesn't exist or append if it does
     try:
@@ -271,7 +330,7 @@ async def automatic_scan(session):
                 print(f"{Color.GREEN}✅ Found {len(valid_new_urls)} new URLs for dork: {dork}{Color.RESET}")
                 for index, url in enumerate(valid_new_urls, start=1):
                     print(f"{Color.MAGENTA}🔢 Scanning site {index}/{len(valid_new_urls)} for dork '{dork}'...{Color.RESET}")
-                    await analyze_site(url, session)
+                    await analyze_site(url, session, feedback_data)
                     delay = random.randint(config['retry_delay'], config['retry_delay'] + 2)
                     print(f"{Color.YELLOW}⏳ Waiting {delay}s before next...{Color.RESET}\n")
                     await asyncio.sleep(delay)
@@ -284,12 +343,36 @@ async def automatic_scan(session):
 
     print(f"{Color.GREEN}🎯 Finished automatic scan. Results saved to braintree_results.csv{Color.RESET}")
 
+async def train_model(feedback_data):
+    """تدريب نموذج تصنيف باستخدام بيانات التغذية الراجعة."""
+    if feedback_data:
+        # إعداد البيانات
+        texts, labels = zip(*feedback_data)
+
+        # تقسيم البيانات إلى مجموعة تدريب واختبار
+        X_train, X_test, y_train, y_test = train_test_split(texts, labels, test_size=0.2, random_state=42)
+
+        # إنشاء نموذج باستخدام CountVectorizer و Naive Bayes
+        model = make_pipeline(CountVectorizer(), MultinomialNB())
+        model.fit(X_train, y_train)
+
+        # تقييم النموذج
+        predictions = model.predict(X_test)
+        print("Model Accuracy:", metrics.accuracy_score(y_test, predictions))
+
+        # توليد Dorks جديدة
+        for _ in range(3):  # توليد 3 Dorks جديدة
+            dork = generate_dork("Generate a strong Dork based on Braintree")
+            print(f"Generated Dork: {dork}")
+
 async def main():
     print(f"{Color.CYAN}🛠️ Braintree Detector Script v2.1 (Async - Automatic){Color.RESET}")
     automatic = input(f"{Color.BLUE}⚙️ Run in automatic mode using predefined Dorks? (yes/no): {Color.RESET}").lower()
     async with aiohttp.ClientSession() as session:
+        feedback_data = []  # لتخزين بيانات التغذية الراجعة
         if automatic == 'yes':
-            await automatic_scan(session)
+            await automatic_scan(session, feedback_data)
+            await train_model(feedback_data)  # تدريب النموذج بعد الفحص
         else:
             dork = input(f"{Color.CYAN}🔎 Enter Google Dork: {Color.RESET}")
             try:
@@ -317,11 +400,12 @@ async def main():
             for index, url in enumerate(urls, start=1):
                 print(f"{Color.MAGENTA}🔢 Scanning site {index}/{len(urls)}...{Color.RESET}")
                 
-                await analyze_site(url, session)
+                await analyze_site(url, session, feedback_data)
                 delay = random.randint(config['retry_delay'], config['retry_delay'] + 2)
                 print(f"{Color.YELLOW}⏳ Waiting {delay}s before next...{Color.RESET}\n")
                 await asyncio.sleep(delay)
 
+            await train_model(feedback_data)  # تدريب النموذج بعد الفحص
             print(f"{Color.GREEN}🎯 Finished scanning {len(urls)} sites. Results saved to braintree_results.csv{Color.RESET}")
 
 if __name__ == '__main__':
