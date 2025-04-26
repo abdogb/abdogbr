@@ -8,24 +8,18 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
+      - uses: actions/checkout@v3
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb chromium-browser chromium-chromedriver
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
+      - uses: actions/setup-python@v4
         with:
           python-version: "3.10"
-
       - name: Install Python dependencies
         run: |
           pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
-
       - name: Run search tool headless
         run: |
           xvfb-run -a python "modified_search_tool.py"
