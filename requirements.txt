@@ -1,0 +1,7 @@
+aiohttp
+beautifulsoup4
+googlesearch-python
+transformers
+scikit-learn
+selenium
+webdriver-manager
