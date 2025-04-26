@@ -1,5 +1,7 @@
+asyncio
 aiohttp
 beautifulsoup4
+urllib3
 googlesearch-python
 transformers
 scikit-learn
