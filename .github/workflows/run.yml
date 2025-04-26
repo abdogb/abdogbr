@@ -1,4 +1,3 @@
-
 name: Run Script
 
 on:
@@ -10,25 +9,30 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y chromium-browser chromium-chromedriver xvfb
-
-      - name: Set Chrome Environment Variables
-        run: |
-          echo "CHROME_BIN=$(which chromium-browser)" >> $GITHUB_ENV
-          echo "PATH=$PATH:/usr/lib/chromium-browser/" >> $GITHUB_ENV
-
-      - uses: actions/setup-python@v4
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      - name: Install Python dependencies
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Google Chrome
         run: |
-          pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-          pip install -r requirements.txt
+          sudo apt update
+          sudo apt install -y wget unzip
+          wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo apt install -y ./google-chrome-stable_current_amd64.deb
+
+      - name: Install ChromeDriver
+        run: |
+          CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+')
+          wget -N https://chromedriver.storage.googleapis.com/$(curl -sS chromedriver.storage.googleapis.com/LATEST_RELEASE | head -n 1)/chromedriver_linux64.zip
+          unzip chromedriver_linux64.zip
+          sudo mv chromedriver /usr/bin/chromedriver
+          sudo chmod +x /usr/bin/chromedriver
 
       - name: Run search tool with xvfb
         run: |
+          sudo apt install xvfb
           xvfb-run -a python "modified_search_tool.py"
