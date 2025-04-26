@@ -14,7 +14,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y chromium-browser chromium-chromedriver
+          sudo apt-get install -y xvfb chromium-browser chromium-chromedriver
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -23,7 +23,8 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install -r requirements.txt
 
-      - name: Run search tool
-        run: python "modified_search_tool.py"
+      - name: Run search tool headless
+        run: |
+          xvfb-run -a python "modified_search_tool.py"
