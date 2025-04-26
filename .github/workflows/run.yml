@@ -43,5 +43,5 @@ jobs:
           xvfb-run -a python "modified_search_tool.py"
 
       - name: Post Run actions/checkout@v3
-        if: ${ failure() }
+        if: failure()
         uses: actions/checkout@v3
