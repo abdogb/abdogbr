@@ -3,22 +3,18 @@ name: Run Python Script
 on:
   push:
     paths:
-      - بب.py
+      - 'بب22.py'
+  workflow_dispatch:
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v2
         with:
-          python-version: "3.10"
-
+          python-version: 3.x
       - name: Install dependencies
-        run: |
-          pip install transformers requests
-
+        run: pip install -r requirements.txt || true
       - name: Run script
-        run: python بب.py
+        run: python بب22.py
