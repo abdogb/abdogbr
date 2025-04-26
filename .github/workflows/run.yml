@@ -17,9 +17,14 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Update package lists
+        run: sudo apt update
+
+      - name: Remove existing Chrome packages (if any)
+        run: sudo apt purge -y google-chrome*
+
       - name: Install Google Chrome
         run: |
-          sudo apt update
           sudo apt install -y wget unzip
           wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
           sudo apt install -y ./google-chrome-stable_current_amd64.deb
@@ -36,3 +41,7 @@ jobs:
         run: |
           sudo apt install xvfb
           xvfb-run -a python "modified_search_tool.py"
+
+      - name: Post Run actions/checkout@v3
+        if: ${ failure() }
+        uses: actions/checkout@v3
