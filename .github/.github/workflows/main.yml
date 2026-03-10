@@ -1,0 +1,18 @@
+name: Predator-Auto-Run
+on:
+  schedule:
+    - cron: '0 * * * *' # هيشتغل لوحده كل ساعة
+  workflow_dispatch: # زرار للتشغيل اليدوي في أي وقت
+jobs:
+  run-predator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install Dependencies
+        run: pip install pyTelegramBotAPI cloudscraper beautifulsoup4 requests
+      - name: Start Hunting
+        run: python bot.py
